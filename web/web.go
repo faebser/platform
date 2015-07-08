@@ -49,6 +49,7 @@ func InitWeb() {
 
 	api.Srv.Router.Handle("/", api.AppHandler(root)).Methods("GET")
 	api.Srv.Router.Handle("/login", api.AppHandler(login)).Methods("GET")
+	api.Srv.Router.Handle("/login/oauth2/authorize", api.UserRequired(authorizeOAuth2)).Methods("GET")
 	api.Srv.Router.Handle("/signup_team_confirm/", api.AppHandler(signupTeamConfirm)).Methods("GET")
 	api.Srv.Router.Handle("/signup_team_complete/", api.AppHandler(signupTeamComplete)).Methods("GET")
 	api.Srv.Router.Handle("/signup_user_complete/", api.AppHandler(signupUserComplete)).Methods("GET")
@@ -427,5 +428,48 @@ func resetPassword(c *api.Context, w http.ResponseWriter, r *http.Request) {
 	page.Props["Data"] = data
 	page.Props["Domain"] = domain
 	page.Props["IsReset"] = strconv.FormatBool(isResetLink)
+	page.Render(c, w)
+}
+
+func authorizeOAuth2(c *api.Context, w http.ResponseWriter, r *http.Request) {
+	if !CheckBrowserCompatability(c, r) {
+		return
+	}
+
+	responseType := r.URL.Query().Get("response_type")
+	clientId := r.URL.Query().Get("client_id")
+	redirect := r.URL.Query().Get("redirect_uri")
+	scope := r.URL.Query().Get("scope")
+	state := r.URL.Query().Get("state")
+
+	if len(responseType) == 0 || len(clientId) == 0 || len(redirect) == 0 || len(state) == 0 {
+		c.Err = model.NewAppError("authorizeOAuth2", "Missing one or more of response_type, client_id, redirect_uri, or state", "")
+		return
+	}
+
+	var app *model.App
+	if result := <-api.Srv.Store.App().Get(clientId); result.Err != nil {
+		c.Err = result.Err
+		return
+	} else {
+		app = result.Data.(*model.App)
+	}
+
+	var team *model.Team
+	if result := <-api.Srv.Store.Team().Get(c.Session.TeamId); result.Err != nil {
+		c.Err = result.Err
+		return
+	} else {
+		team = result.Data.(*model.Team)
+	}
+
+	page := NewHtmlTemplatePage("authorize", "Authorize Application")
+	page.Props["TeamName"] = team.Name
+	page.Props["AppName"] = app.Name
+	page.Props["ResponseType"] = responseType
+	page.Props["ClientId"] = clientId
+	page.Props["RedirectUri"] = redirect
+	page.Props["Scope"] = scope
+	page.Props["State"] = state
 	page.Render(c, w)
 }

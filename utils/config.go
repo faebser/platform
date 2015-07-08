@@ -30,6 +30,7 @@ type ServiceSettings struct {
 	PublicLinkSalt string
 	ResetSalt      string
 	AnalyticsUrl   string
+	AesKey         string
 }
 
 type SqlSettings struct {

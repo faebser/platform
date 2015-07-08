@@ -8,9 +8,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
-	crand "crypto/rand"
 	dbsql "database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -28,14 +28,17 @@ import (
 )
 
 type SqlStore struct {
-	master   *gorp.DbMap
-	replicas []*gorp.DbMap
-	team     TeamStore
-	channel  ChannelStore
-	post     PostStore
-	user     UserStore
-	audit    AuditStore
-	session  SessionStore
+	master     *gorp.DbMap
+	replicas   []*gorp.DbMap
+	team       TeamStore
+	channel    ChannelStore
+	post       PostStore
+	user       UserStore
+	audit      AuditStore
+	session    SessionStore
+	app        AppStore
+	authData   AuthDataStore
+	accessData AccessDataStore
 }
 
 func NewSqlStore() Store {
@@ -59,15 +62,11 @@ func NewSqlStore() Store {
 	sqlStore.user = NewSqlUserStore(sqlStore)
 	sqlStore.audit = NewSqlAuditStore(sqlStore)
 	sqlStore.session = NewSqlSessionStore(sqlStore)
+	sqlStore.app = NewSqlAppStore(sqlStore)
+	sqlStore.authData = NewSqlAuthDataStore(sqlStore)
+	sqlStore.accessData = NewSqlAccessDataStore(sqlStore)
 
 	sqlStore.master.CreateTablesIfNotExists()
-
-	sqlStore.team.(*SqlTeamStore).CreateIndexesIfNotExists()
-	sqlStore.channel.(*SqlChannelStore).CreateIndexesIfNotExists()
-	sqlStore.post.(*SqlPostStore).CreateIndexesIfNotExists()
-	sqlStore.user.(*SqlUserStore).CreateIndexesIfNotExists()
-	sqlStore.audit.(*SqlAuditStore).CreateIndexesIfNotExists()
-	sqlStore.session.(*SqlSessionStore).CreateIndexesIfNotExists()
 
 	sqlStore.team.(*SqlTeamStore).UpgradeSchemaIfNeeded()
 	sqlStore.channel.(*SqlChannelStore).UpgradeSchemaIfNeeded()
@@ -75,6 +74,19 @@ func NewSqlStore() Store {
 	sqlStore.user.(*SqlUserStore).UpgradeSchemaIfNeeded()
 	sqlStore.audit.(*SqlAuditStore).UpgradeSchemaIfNeeded()
 	sqlStore.session.(*SqlSessionStore).UpgradeSchemaIfNeeded()
+	sqlStore.app.(*SqlAppStore).UpgradeSchemaIfNeeded()
+	sqlStore.authData.(*SqlAuthDataStore).UpgradeSchemaIfNeeded()
+	sqlStore.accessData.(*SqlAccessDataStore).UpgradeSchemaIfNeeded()
+
+	sqlStore.team.(*SqlTeamStore).CreateIndexesIfNotExists()
+	sqlStore.channel.(*SqlChannelStore).CreateIndexesIfNotExists()
+	sqlStore.post.(*SqlPostStore).CreateIndexesIfNotExists()
+	sqlStore.user.(*SqlUserStore).CreateIndexesIfNotExists()
+	sqlStore.audit.(*SqlAuditStore).CreateIndexesIfNotExists()
+	sqlStore.session.(*SqlSessionStore).CreateIndexesIfNotExists()
+	sqlStore.app.(*SqlAppStore).CreateIndexesIfNotExists()
+	sqlStore.authData.(*SqlAuthDataStore).CreateIndexesIfNotExists()
+	sqlStore.accessData.(*SqlAccessDataStore).CreateIndexesIfNotExists()
 
 	return sqlStore
 }
@@ -264,6 +276,18 @@ func (ss SqlStore) Audit() AuditStore {
 	return ss.audit
 }
 
+func (ss SqlStore) App() AppStore {
+	return ss.app
+}
+
+func (ss SqlStore) AuthData() AuthDataStore {
+	return ss.authData
+}
+
+func (ss SqlStore) AccessData() AccessDataStore {
+	return ss.accessData
+}
+
 type mattermConverter struct{}
 
 func (me mattermConverter) ToDb(val interface{}) (interface{}, error) {
@@ -362,21 +386,21 @@ func decrypt(key []byte, cryptoText string) (string, error) {
 
 	ciphertext, err := base64.URLEncoding.DecodeString(cryptoText)
 	if err != nil {
-	       return "", err
+		return "", err
 	}
 
 	skey := sha512.Sum512(key)
 	ekey, akey := skey[:32], skey[32:]
 	macfn := hmac.New(sha256.New, akey)
 	if len(ciphertext) < aes.BlockSize+macfn.Size() {
-	       return "", errors.New("short ciphertext")
+		return "", errors.New("short ciphertext")
 	}
 
 	macfn.Write(ciphertext[aes.BlockSize+macfn.Size():])
 	expectedMac := macfn.Sum(nil)
-	mac := ciphertext[aes.BlockSize:aes.BlockSize+macfn.Size()]
+	mac := ciphertext[aes.BlockSize : aes.BlockSize+macfn.Size()]
 	if hmac.Equal(expectedMac, mac) != true {
-	       return "", errors.New("Incorrect MAC for the given ciphertext")
+		return "", errors.New("Incorrect MAC for the given ciphertext")
 	}
 
 	block, err := aes.NewCipher(ekey)
